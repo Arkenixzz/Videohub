@@ -8,7 +8,7 @@ import { h, api, toast, confirmBox } from '../app.js';
 
 const TC = (s) => { s = Math.max(0, +s || 0); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(2).padStart(5, '0')}`; };
 const parseTC = (v) => { const m = /^(?:(\d+):)?(\d+(?:[.,]\d+)?)$/.exec(String(v).trim()); return m ? (+(m[1] || 0)) * 60 + +m[2].replace(',', '.') : null; };
-const FONTS = ['', 'Montserrat', 'Impact', 'Arial Black', 'Segoe UI', 'Bahnschrift', 'Georgia', 'Consolas'];
+const FONTS = ['', 'Montserrat', 'Impact', 'Arial Black', 'Helvetica Neue', 'Avenir Next Condensed', 'Georgia', 'Menlo'];
 const KIND_TR = { image: 'Image', text: 'Text', rect: 'Box', ellipse: 'Circle', arrow: 'Arrow' };
 const HS = 9;   // handle size (screen px)
 
@@ -73,7 +73,7 @@ export function createEdit2d({ src, projectId, frame, panelHost, onOpen, onClose
     const g = cv.getContext('2d'), k = sx();
     g.clearRect(0, 0, cv.width, cv.height);
     // characters: a bracket from the feet up, named
-    g.font = '600 11px Segoe UI'; g.textBaseline = 'bottom';
+    g.font = '600 11px Helvetica Neue'; g.textBaseline = 'bottom';
     for (const a of actors()) {
       const on = actSel && actSel.key === a.key && actSel.shot === a.shot;
       g.strokeStyle = on ? '#e6c14d' : a.hidden ? 'rgba(232,84,84,.8)' : 'rgba(96,156,255,.85)'; g.lineWidth = on ? 2 : 1.3; g.setLineDash(a.hidden ? [4, 4] : []);

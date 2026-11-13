@@ -1,0 +1,8 @@
+node_modules/
+data/
+.test-tmp/
+*.log
+examples/*/render/
+examples/*/.videohub/
+examples/*/node_modules/
+.DS_Store

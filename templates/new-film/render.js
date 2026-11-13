@@ -1,4 +1,4 @@
-// Renders the film to MP4 in 2-second chunks with headless Edge/Chrome (puppeteer-core) + ffmpeg.
+// Renders the film to MP4 in 2-second chunks with headless Chrome/Edge (puppeteer-core) + ffmpeg.
 //
 //   node render.js [workers]          → render/chunks/c_000.mp4 … (+ render/video.mp4 and render/<name>.mp4 when run by hand)
 //   ONLY=2,3 node render.js           → re-renders only chunks 2 and 3 (VideoHub's partial re-render)
@@ -16,8 +16,8 @@
 //   pixels are read straight from the canvas, handed to a Web Worker and sent to this script over a local WebSocket;
 //   ffmpeg gets raw RGBA (lossless, no JPEG). Any other page is captured as PNG screenshots (also lossless).
 //   VIDEOHUB_TRANSPORT=png forces screenshots (the WebSocket server is built in: no package needed). Every frame is a pure function of t, so workers can render in parallel.
-// - Encoder: VIDEOHUB_ENCODER = auto | nvenc | amf | qsv | x264 (auto: the first graphics-card encoder whose test
-//   encode works, else x264). A named encoder that does not work here falls back to x264.
+// - Encoder: VIDEOHUB_ENCODER = auto | videotoolbox | x264 (auto: the Mac's hardware encoder when its test encode
+//   works, else x264). A named encoder that does not work here falls back to x264.
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os');
 const { spawn, spawnSync, execFileSync } = require('child_process');
@@ -35,16 +35,17 @@ function loadPuppeteer() {
   console.error('puppeteer-core not found: run "npm install" in this folder (or render through VideoHub, which ships it).');
   process.exit(2);
 }
-// the browser: CHROME env, else Edge, else Chrome
+// the browser: CHROME env, else Chrome, Edge, Brave or Chromium (in /Applications or ~/Applications)
 function browserPath() {
-  const c = [process.env.CHROME,
-    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-    'C:/Program Files/Google/Chrome/Application/chrome.exe', path.join(os.homedir(), 'AppData/Local/Google/Chrome/Application/chrome.exe')].filter(Boolean);
+  const apps = ['Google Chrome.app/Contents/MacOS/Google Chrome', 'Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    'Brave Browser.app/Contents/MacOS/Brave Browser', 'Chromium.app/Contents/MacOS/Chromium'];
+  const c = [process.env.CHROME, ...apps.flatMap(a => ['/Applications/' + a, path.join(os.homedir(), 'Applications', a)])].filter(Boolean);
   const f = c.find(x => fs.existsSync(x));
-  if (!f) { console.error('No Edge or Chrome found (set CHROME to a Chromium browser).'); process.exit(2); }
+  if (!f) { console.error('No Chrome or Edge found (set CHROME to a Chromium browser).'); process.exit(2); }
   return f;
 }
-const FFMPEG = process.env.FFMPEG || 'ffmpeg';
+// ffmpeg: FFMPEG env, else Homebrew's (a render started from the Dock has a short PATH), else the PATH
+const FFMPEG = process.env.FFMPEG || ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(f => fs.existsSync(f)) || 'ffmpeg';
 
 const PREVIEW = process.env.PREVIEW === '1';
 const FPS = +(process.env.FPS || 30), DUR = +(process.env.DUR || 10), CH = 60, VW = 1920, VH = 1080;
@@ -54,20 +55,18 @@ const OUT = PREVIEW ? path.resolve('render/preview') : path.resolve('render/chun
 
 // ---------- encoders (the same table as VideoHub's server/encoders.js; quality checked against a lossless reference)
 const ENCODER_ARGS = {
-  nvenc: [['-c:v', 'h264_nvenc', '-preset', 'p7', '-tune', 'hq', '-rc', 'vbr', '-cq', '20', '-b:v', '0', '-maxrate', '250M', '-bufsize', '500M', '-level', '5.2', '-spatial-aq', '1', '-temporal-aq', '1', '-rc-lookahead', '32', '-bf', '3', '-b_ref_mode', 'middle']],
-  amf: [['-c:v', 'h264_amf', '-usage', 'transcoding', '-quality', 'quality', '-rc', 'cqp', '-qp_i', '14', '-qp_p', '16', '-qp_b', '18', '-bf', '3'],
-    ['-c:v', 'h264_amf', '-usage', 'transcoding', '-quality', 'quality', '-rc', 'cqp', '-qp_i', '14', '-qp_p', '16', '-qp_b', '18']],
-  qsv: [['-c:v', 'h264_qsv', '-preset', 'veryslow', '-global_quality', '18', '-look_ahead', '1']],
+  videotoolbox: [['-c:v', 'h264_videotoolbox', '-q:v', '65', '-profile:v', 'high', '-allow_sw', '0', '-realtime', '0'],
+    ['-c:v', 'h264_videotoolbox', '-b:v', '40M', '-maxrate', '80M', '-bufsize', '80M', '-profile:v', 'high', '-allow_sw', '0', '-realtime', '0']],
   x264: [['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16']],
   lossless: [['-c:v', 'libx264rgb', '-preset', 'ultrafast', '-qp', '0']],   // for checks only (huge files)
 };
-const probe = args => spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=640x360:r=30', '-frames:v', '5', '-pix_fmt', 'yuv420p', ...args, '-f', 'null', '-'], { stdio: 'ignore', timeout: 20000, windowsHide: true }).status === 0;
+const probe = args => spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=640x360:r=30', '-frames:v', '5', '-pix_fmt', 'yuv420p', ...args, '-f', 'null', '-'], { stdio: 'ignore', timeout: 20000 }).status === 0;
 function pickEncoder() {
   const want = String(process.env.VIDEOHUB_ENCODER || 'auto').toLowerCase();
   const works = n => (ENCODER_ARGS[n] || []).find(probe) || null;
   if (want === 'x264' || want === 'lossless') return { name: want, args: ENCODER_ARGS[want][0] };
-  for (const n of want === 'auto' ? ['nvenc', 'amf', 'qsv'] : [want]) { const a = works(n); if (a) return { name: n, args: a }; }
-  if (want !== 'auto') console.log(`encoder ${want} does not work on this PC: using x264`);
+  for (const n of want === 'auto' ? ['videotoolbox'] : [want]) { const a = works(n); if (a) return { name: n, args: a }; }
+  if (want !== 'auto') console.log(`encoder ${want} does not work on this Mac: using x264`);
   return { name: 'x264', args: ENCODER_ARGS.x264[0] };
 }
 let ENC = null;
@@ -80,7 +79,7 @@ function encoder(input, out) {
   const size = input === 'raw' && scale !== 1 ? `${Math.round(VW * scale)}:${Math.round(VH * scale)}:flags=bicubic:` : '';
   const pix = ENC.name === 'lossless' ? ['-pix_fmt', 'rgb24'] : ['-vf', `scale=${size}out_color_matrix=bt601:out_range=tv`, '-pix_fmt', 'yuv420p', '-colorspace', 'smpte170m', '-color_range', 'tv'];
   if (ENC.name === 'lossless' && size) pix.unshift('-vf', `scale=${size.slice(0, -1)}`);
-  return spawn(FFMPEG, ['-y', '-loglevel', 'error', ...inArgs, ...ENC.args, ...pix, '-r', String(fps), out], { stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true });
+  return spawn(FFMPEG, ['-y', '-loglevel', 'error', ...inArgs, ...ENC.args, ...pix, '-r', String(fps), out], { stdio: ['pipe', 'inherit', 'inherit'] });
 }
 
 // ---------- page side of the raw path (runs in the page): is the canvas the whole picture? then read it every frame

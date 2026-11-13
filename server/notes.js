@@ -15,7 +15,7 @@ export const KINDS = NOTE_KINDS;
 export const vhDir = p => p.group ? path.join(DATA_DIR, 'projects', p.id) : path.join(p.path, '.videohub');
 const notesFile = p => path.join(vhDir(p), 'notes.json');
 // a picture path read from notes.json is only deleted or served when it is inside the project's notes folder: a downloaded
-// project could carry a notes.json whose pictures point at any file on the PC ("Remove all old notes" would delete them)
+// project could carry a notes.json whose pictures point at any file on the Mac ("Remove all old notes" would delete them)
 const notesDir = p => path.join(vhDir(p), 'notes');
 const inNotes = (dir, f) => typeof f === 'string' && path.isAbsolute(f) && isInside(path.dirname(path.resolve(f)), dir);
 const unlinkImg = (dir, f) => { if (inNotes(dir, f)) try { fs.unlinkSync(f); } catch { } };

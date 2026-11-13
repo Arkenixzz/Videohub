@@ -1,23 +1,25 @@
-// Setup's helper for data/config.json: setup.ps1 asks the questions, this file decides and writes (so the logic lives
+// Setup's helper for data/config.json: setup.sh asks the questions, this file decides and writes (so the logic lives
 // next to server/config.js and is unit-tested in scripts/init-config.test.js). It never moves or deletes a folder,
 // never overwrites a value an existing config.json has and never replaces a config it cannot read.
 //
 //   node scripts/init-config.mjs --state                      what is decided already, the defaults, folders found (JSON)
 //   node scripts/init-config.mjs --check <folder>             can this folder be the workspace? {ok, why}
-//   node scripts/init-config.mjs --detect [--refresh]         encoders this PC can use (server/encoders.js, cached)
-//   node scripts/init-config.mjs [--workspace <folder>] [--watch <folder>]... [--encoder auto|nvenc|amf|qsv|x264]
+//   node scripts/init-config.mjs --detect [--refresh]         encoders this Mac can use (server/encoders.js, cached)
+//   node scripts/init-config.mjs [--workspace <folder>] [--watch <folder>]... [--encoder auto|videotoolbox|x264]
 //                                [--dry-run]                  write config.json (+ create the workspace folders)
-//   node scripts/init-config.mjs --example                    copy examples\hello-film into the films folder (once)
-//   --data <folder>  another data folder than <VideoHub>\data (tests)
+//   node scripts/init-config.mjs --example                    copy examples/hello-film into the films folder (once)
+//   --data <folder>  another data folder than <VideoHub>/data (tests)
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { DEFAULTS, DEFAULT_BASE, WORKSPACE_FOLDERS, discoverRoots } from '../server/config.js';
 import { ENCODERS, detectEncoders } from '../server/encoders.js';
 
 export const HUB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const low = p => path.resolve(p).toLowerCase();
-const inside = (c, p) => low(c) === low(p) || low(c).startsWith(low(p).replace(/\\$/, '') + '\\');
+const inside = (c, p) => low(c) === low(p) || low(c).startsWith(low(p).replace(/\/$/, '') + '/');
+const untilde = p => p === '~' ? os.homedir() : p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
 
 export const README = `This is your VideoHub workspace: everything VideoHub makes lives here.
 
@@ -32,13 +34,13 @@ VideoHub never deletes anything here by itself. Settings > Folders shows and cha
 
 // null when the folder can be the workspace, else why not (plain words for setup)
 export function checkWorkspace(p, hubDir = HUB) {
-  if (typeof p !== 'string' || !p.trim()) return 'Type a folder, for example D:\\Videos\\VideoHub.';
-  p = p.trim().replace(/^"(.*)"$/, '$1');
-  if (!/^([a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(p)) return 'Type a full path that starts with a drive letter, for example D:\\Videos\\VideoHub.';
+  if (typeof p !== 'string' || !p.trim()) return 'Type a folder, for example /Users/you/Movies/VideoHub.';
+  p = untilde(p.trim().replace(/^["'](.*)["']$/, '$1'));
+  if (!p.startsWith('/')) return 'Type a full path that starts with / (or ~/), for example ~/Documents/VideoHub.';
   const r = path.resolve(p);
-  if (path.parse(r).root.toLowerCase() === (r.endsWith('\\') ? r : r + '\\').toLowerCase()) return 'Pick a folder, not a whole drive (for example ' + r.replace(/\\?$/, '\\') + 'VideoHub).';
+  if (r === '/' || /^\/Volumes\/[^/]+$/.test(r) || r === '/Volumes') return 'Pick a folder, not a whole disk (for example ' + path.join(r, 'VideoHub') + ').';
   if (inside(r, hubDir)) return 'Pick a folder outside the VideoHub program folder (updates replace that folder).';
-  let a = r; while (!fs.existsSync(a)) { const up = path.dirname(a); if (up === a) return 'The drive ' + path.parse(r).root + ' does not exist on this PC.'; a = up; }
+  let a = r; while (!fs.existsSync(a)) { const up = path.dirname(a); if (up === a) return 'The disk of ' + r + ' is not connected to this Mac.'; a = up; }
   try { if (!fs.statSync(a).isDirectory()) return a === r ? 'That is a file, not a folder.' : a + ' is a file, not a folder.'; } catch { return 'That folder cannot be read.'; }
   return null;
 }
@@ -97,13 +99,13 @@ export function initConfig({ dataDir = path.join(HUB, 'data'), hubDir = HUB, wor
   if (changed) W(`write ${file}`);
   if (!dryRun) {
     for (const d of dirs) fs.mkdirSync(d, { recursive: true });
-    if (wantReadme) fs.writeFileSync(readme, README.replace(/\n/g, '\r\n'), { flag: 'wx' });
+    if (wantReadme) fs.writeFileSync(readme, README, { flag: 'wx' });
     if (changed) { fs.mkdirSync(dataDir, { recursive: true }); const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(cfg, null, 1)); fs.renameSync(tmp, file); }
   }
   return { file, existed: !!saved, workspace: ws, encoder: cfg.render.encoder, roots: cfg.roots, wrote: changed && !dryRun, dryRun, actions };
 }
 
-// ---------- command line (setup.ps1)
+// ---------- command line (setup.sh)
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2), val = k => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
   const all = k => a.flatMap((x, i) => x === k && a[i + 1] != null ? [a[i + 1]] : []);
@@ -120,9 +122,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     if (a.includes('--state')) out(state({ dataDir }));
     else if (a.includes('--check')) { const why = checkWorkspace(val('--check') || ''); out({ ok: !why, why }); }
-    else if (a.includes('--detect')) out(await detectEncoders({ cacheFile: a.includes('--dry-run') ? null : path.join(dataDir, 'encoders.json'), refresh: a.includes('--refresh'), ffmpeg: val('--ffmpeg') || 'ffmpeg' }));
+    else if (a.includes('--detect')) out(await detectEncoders({ cacheFile: a.includes('--dry-run') ? null : path.join(dataDir, 'encoders.json'), refresh: a.includes('--refresh'), ffmpeg: val('--ffmpeg') || ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(f => fs.existsSync(f)) || 'ffmpeg' }));
     // the example film, the same copy as the Welcome panel's button (server/example.js); never twice
     else if (a.includes('--example')) { const ex = await import('../server/example.js'), i = ex.info(); out(i.installed ? { ...i, kept: true } : ex.install()); }
-    else out(initConfig({ dataDir, workspace: val('--workspace'), watch: all('--watch'), encoder: val('--encoder'), dryRun: a.includes('--dry-run') }));
+    else out(initConfig({ dataDir, workspace: val('--workspace') && untilde(val('--workspace')), watch: all('--watch'), encoder: val('--encoder'), dryRun: a.includes('--dry-run') }));
   } catch (e) { out({ error: e.message }); process.exit(1); }
 }

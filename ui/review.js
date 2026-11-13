@@ -149,7 +149,7 @@ export async function reviewPage(page, id, relArg = '') {
   const changedBtn = h('button', { hidden: true, onclick: () => playChanged() }, 'Watch only the changes');
   const proxyPill = h('span', { class: 'pill', title: 'Lightweight review copy for smooth frame stepping' }, '…');
   const helpBtn = h('button', { class: 'ghost', title: 'How to use, all keyboard shortcuts (?)', onclick: () => toggleHelp() }, '❔ Help');
-  const folderBtn = h('button', { class: 'ghost', title: 'Open project folder in Explorer: ' + p.path, onclick: () => openFolder(id) }, '📂 Folder');
+  const folderBtn = h('button', { class: 'ghost', title: 'Show project folder in Finder: ' + p.path, onclick: () => openFolder(id) }, '📂 Folder');
   const liveRefreshBtn = liveMode ? h('button', { class: 'ghost', title: 'Find the current page again and reload the code', onclick: async () => {
     try { const fresh = await api('/api/project/' + id + '/live'); if (fresh.ok) liveSrc.reload(fresh); else toast(fresh.reason, true); }
     catch (e) { toast(e.message, true); }
@@ -597,7 +597,7 @@ export async function reviewPage(page, id, relArg = '') {
       if (n.id === S.selected && !near && Math.abs(t - at) > 2) continue;
       const sh = numbered(n.drawing || [], n.id); paint(octx, sh, W, H, near ? 0.95 : 0.4);
       const b = sh.length ? bbox(sh) : [0.02, 0.04];
-      octx.font = `600 ${Math.max(13, W * 0.013)}px Segoe UI`; const txt = `#${n.id} ${n.text.slice(0, 42)}`, tw = octx.measureText(txt).width;
+      octx.font = `600 ${Math.max(13, W * 0.013)}px Helvetica Neue`; const txt = `#${n.id} ${n.text.slice(0, 42)}`, tw = octx.measureText(txt).width;
       const lh = Math.max(22, W * 0.02), onlyPin = sh.length && sh.every(x => x.type === 'pin'), pr = pinR(W);
       // a point note: label beside the marker head; anything else: above the drawing
       const x = Math.min(W - tw - 20, b[0] * W + (onlyPin ? pr * 1.4 : 0)), y = Math.max(4, onlyPin ? b[1] * H - pr * PIN_HEAD - lh / 2 : b[1] * H - 30);
@@ -935,7 +935,7 @@ export async function reviewPage(page, id, relArg = '') {
   // P4: the sound library at the top of the Sounds tab (▶ listen, + at the playhead, drag onto the timeline)
   const library = createLibrary({ onAdd: item => soundEd?.dropAdd({ item, t: nowT() }), onFile: () => soundEd?.pickFile() });
   soundsHost.prepend(library.el);
-  // files dragged from Explorer and dropped anywhere but the timeline would make the window open the file
+  // files dragged from the Finder and dropped anywhere but the timeline would make the window open the file
   const dropGuard = e => { if (![...(e.dataTransfer?.types || [])].includes('Files') || e.target?.closest?.('.tl2-body')) return; e.preventDefault(); if (e.type === 'dragover') e.dataTransfer.dropEffect = 'none'; else toast('Drop the sound file onto the timeline'); };
   document.addEventListener('dragover', dropGuard); document.addEventListener('drop', dropGuard);
   setTimeout(() => Promise.all([api(`/api/project/${id}/layers`), api(`/api/project/${id}/sound-info`).catch(() => null), api(`/api/project/${id}/tweaks`).catch(() => ({}))]).then(async ([L, info, tw]) => {

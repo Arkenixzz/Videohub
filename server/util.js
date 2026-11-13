@@ -6,35 +6,40 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { findBrowsers } from './mac.js';
 
 export const HUB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // VIDEOHUB_DATA_DIR: npm test keeps its config, caches and queue out of the install's own data folder
 export const DATA_DIR = process.env.VIDEOHUB_DATA_DIR ? path.resolve(process.env.VIDEOHUB_DATA_DIR) : path.join(HUB_DIR, 'data');
 export const HOME = os.homedir();
-export const DESKTOP = (() => {
-  // OneDrive can move the Desktop; prefer the one that exists
-  for (const d of [path.join(HOME, 'Desktop'), path.join(HOME, 'OneDrive', 'Desktop'), path.join(HOME, 'OneDrive', 'Masa\u00fcst\u00fc')]) if (fs.existsSync(d)) return d;
-  return path.join(HOME, 'Desktop');
-})();
-export const DOCUMENTS = (() => {
-  for (const d of [path.join(HOME, 'Documents'), path.join(HOME, 'OneDrive', 'Documents')]) if (fs.existsSync(d)) return d;
-  return path.join(HOME, 'Documents');
-})();
-export const APPDATA = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
+// iCloud "Desktop & Documents" keeps these paths, so they are always the ones in the home folder
+export const DESKTOP = path.join(HOME, 'Desktop');
+export const DOCUMENTS = path.join(HOME, 'Documents');
+export const APPDATA = path.join(HOME, 'Library', 'Application Support');
 export const TEMP = os.tmpdir();
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 export const idOf = p => crypto.createHash('sha1').update(path.resolve(p).toLowerCase()).digest('hex').slice(0, 12);
 export const norm = p => path.resolve(p).toLowerCase();
-// Folders that were moved can leave junctions at their old paths, so compare real paths (cached)
+// compare real paths (cached): symlinks, and macOS's own /var → /private/var, /tmp → /private/tmp. A path that does not
+// exist yet is its deepest existing folder's real path plus the rest, so it compares the same way as its parent.
+// Case-insensitive, like the default APFS volume.
 const realCache = new Map();
-const realNorm = p => { const k = norm(p); let r = realCache.get(k); if (r === undefined) { try { r = fs.realpathSync.native(k).toLowerCase(); realCache.set(k, r); } catch { r = k; } } return r; };
+function realOf(p) {
+  const abs = path.resolve(p);
+  for (let cur = abs, rest = ''; ;) {
+    try { return path.join(fs.realpathSync.native(cur), rest); } catch { }
+    const up = path.dirname(cur); if (up === cur) return abs;
+    rest = rest ? path.join(path.basename(cur), rest) : path.basename(cur); cur = up;
+  }
+}
+const realNorm = p => { const k = norm(p); let r = realCache.get(k); if (r === undefined) { r = realOf(p).toLowerCase(); if (fs.existsSync(p)) realCache.set(k, r); } return r; };
 export const isInside = (child, parent) => { const c = realNorm(child), p = realNorm(parent); return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep); };
 // does a command line or path refer to a path inside this install? Never by folder name: films live in Documents\VideoHub\films
 // and the install folder can have any name (a GitHub ZIP unpacks as VideoHub-main). Case-insensitive, both slash styles.
 const slashes = s => String(s || '').toLowerCase().replace(/[\\/]+/g, '/');
 export const refersToHub = (s, hub = HUB_DIR) => new RegExp(slashes(hub).replace(/\/$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:/|["\'\\s]|$)').test(slashes(s));
-export const shortPath = p => (isInside(p, DESKTOP) ? path.relative(DESKTOP, p) : isInside(p, HOME) ? '~\\' + path.relative(HOME, p) : p) || p;
+export const shortPath = p => (isInside(p, DESKTOP) ? path.relative(DESKTOP, p) : isInside(p, HOME) ? '~/' + path.relative(HOME, p) : p) || p;
 
 export function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch { return fallback; }
@@ -49,15 +54,9 @@ export function writeJson(file, data) {
 
 export function run(cmd, args, opts = {}) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { windowsHide: true, maxBuffer: 64 << 20, ...opts }, (err, stdout, stderr) =>
+    execFile(cmd, args, { maxBuffer: 64 << 20, ...opts }, (err, stdout, stderr) =>
       resolve({ code: err ? (err.code ?? 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') }));
   });
-}
-
-// PowerShell with a script passed via -EncodedCommand (no quoting trouble)
-export function powershell(script, opts = {}) {
-  const enc = Buffer.from(script, 'utf16le').toString('base64');
-  return run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], opts);
 }
 
 export async function pLimit(items, n, fn) {
@@ -66,19 +65,24 @@ export async function pLimit(items, n, fn) {
   return out;
 }
 
-// ---------- tools on this PC
+// ---------- tools on this Mac
 function which(name, extra = []) {
   const dirs = (process.env.PATH || '').split(path.delimiter).concat(extra);
   for (const d of dirs) { const f = path.join(d, name); if (d && fs.existsSync(f)) return f; }
   return null;
 }
+// Homebrew's folders too: a hub started from the Dock or at login has a short PATH
+const BREW = ['/opt/homebrew/bin', '/usr/local/bin'];
+const BROWSERS = findBrowsers();
 export const TOOLS = {
-  ffmpeg: which('ffmpeg.exe', ['C:\\ffmpeg\\bin']) || 'ffmpeg',
-  ffprobe: which('ffprobe.exe', ['C:\\ffmpeg\\bin']) || 'ffprobe',
+  ffmpeg: which('ffmpeg', BREW) || 'ffmpeg',
+  ffprobe: which('ffprobe', BREW) || 'ffprobe',
   node: process.execPath,
-  edge: ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'].find(f => fs.existsSync(f)) || null,
-  chrome: ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', path.join(HOME, 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe')].find(f => fs.existsSync(f)) || null,
+  // the browser VideoHub opens its window in (an app window): Chrome (or Brave, Chromium) first, else Edge
+  chrome: BROWSERS.chrome || BROWSERS.brave || BROWSERS.chromium || null,
+  edge: BROWSERS.edge || null,
 };
+export const browserExe = () => TOOLS.chrome || TOOLS.edge;
 
 // ---------- ffprobe with a persistent cache (path + size + mtime)
 const PROBE_CACHE = path.join(DATA_DIR, 'probe-cache.json');

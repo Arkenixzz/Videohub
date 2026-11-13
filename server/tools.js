@@ -16,7 +16,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 async function ping() { try { const r = await fetch(BASE + '/api/ping', { signal: AbortSignal.timeout(1500) }); return r.ok; } catch { return false; } }
 async function ensureHub() {
   if (await ping()) return;
-  const child = spawn(process.execPath, [path.join(HUB_DIR, 'server', 'hub.js')], { cwd: HUB_DIR, detached: true, stdio: 'ignore', windowsHide: true });
+  const child = spawn(process.execPath, [path.join(HUB_DIR, 'server', 'hub.js')], { cwd: HUB_DIR, detached: true, stdio: 'ignore' });
   child.unref();
   for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 500)); if (await ping()) return; }
   throw new Error('Could not start the VideoHub server (' + BASE + ').');
@@ -76,7 +76,7 @@ export const TOOLS = {
     },
   },
   hub_workspace: {
-    description: 'Where this PC keeps its video work: the workspace folder and, inside it, the films folder (make every new film there, one folder per film), the outputs folder (finished renders are collected there by VideoHub; never write there yourself) and the other watched folders. Call it before creating a new film.',
+    description: 'Where this Mac keeps its video work: the workspace folder and, inside it, the films folder (make every new film there, one folder per film), the outputs folder (finished renders are collected there by VideoHub; never write there yourself) and the other watched folders. Call it before creating a new film.',
     schema: {},
     run: async () => {
       const c = await call('GET', '/api/config');
@@ -84,7 +84,7 @@ export const TOOLS = {
       const films = (roots.find(r => r.type === 'container') || {}).path;
       return [
         `Workspace: ${c.workspace}`,
-        films ? `New films go in: ${films}\\<film-name>  (one folder per film; copy templates\\new-film from the VideoHub folder)` : 'No films folder is set: ask the user to add one in VideoHub > Settings > Folders.',
+        films ? `New films go in: ${films}/<film-name>  (one folder per film; copy templates/new-film from the VideoHub folder)` : 'No films folder is set: ask the user to add one in VideoHub > Settings > Folders.',
         `Finished renders are collected in: ${c.outputsDir}  (VideoHub links every render there by day; do not write there)`,
         `Sounds: ${c.soundLibDir}  ·  Thumbnails: ${c.thumbstudio?.globalDir}  ·  Archive: ${c.archiveDir}`,
         roots.length > 1 ? 'Other watched folders: ' + roots.filter(r => r.path !== films).map(r => `${r.path} (${r.type})`).join(', ') : '',
@@ -208,7 +208,7 @@ export const TOOLS = {
     run: async a => {
       const p = await resolve(a.project); const d = await call('GET', `/api/project/${p.id}`);
       if (!d.cleanup.length) return 'Nothing to clean up.';
-      return [`"${p.title}" — ${GB(d.cleanup.reduce((s, c) => s + c.size, 0))} can be cleaned up:`, ...d.cleanup.map(c => `- ${GB(c.size)} ${c.path} — ${c.reason}`), 'Tell the user to approve it on VideoHub\'s Disk page (Recycle Bin / archive). Never delete these yourself.'].join('\n');
+      return [`"${p.title}" — ${GB(d.cleanup.reduce((s, c) => s + c.size, 0))} can be cleaned up:`, ...d.cleanup.map(c => `- ${GB(c.size)} ${c.path} — ${c.reason}`), 'Tell the user to approve it on VideoHub\'s Disk page (Trash / archive). Never delete these yourself.'].join('\n');
     },
   },
 

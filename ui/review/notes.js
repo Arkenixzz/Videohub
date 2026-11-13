@@ -41,7 +41,7 @@ export function createNotesPanel(ctx) {
   async function bulk(action) {
     const ids = oldIds.slice();
     const ok = await confirmBox(action === 'approve' ? `Approve ${ids.length} old notes?` : `Remove ${ids.length} old notes from the list?`,
-      h('p', {}, action === 'approve' ? 'All will be marked as "approved" and their frame images deleted; their text will still appear under the "All" filter.' : 'The notes will be removed from the list and their images deleted. Their text stays in the project\'s .videohub\\notes-archive.json file.'),
+      h('p', {}, action === 'approve' ? 'All will be marked as "approved" and their frame images deleted; their text will still appear under the "All" filter.' : 'The notes will be removed from the list and their images deleted. Their text stays in the project\'s .videohub/notes-archive.json file.'),
       action === 'approve' ? 'Approve' : 'Remove');
     if (!ok) return;
     const r = await api(`/api/project/${ctx.projectId}/notes/bulk`, { method: 'POST', body: { action, ids } });

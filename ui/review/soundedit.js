@@ -1,5 +1,5 @@
 // Added sounds under the timeline (Nov 6, the user: "removing music and adding sound effects should be possible from the UI").
-// "➕ Add sound" picks a ready-made effect (made on this PC with the 3D studio's synth), a file from the user's sound
+// "➕ Add sound" picks a ready-made effect (made on this Mac with the 3D studio's synth), a file from the user's sound
 // folder (config.soundLibDir: music beds…) or any file from disk; it lands at the playhead. The clip lanes of
 // the timeline show them (drag = move, edges = trim, top corners = fades, Alt+drag = copy; timeline.setClipOps); the
 // Clip tab edits the selected one (level, fades, trim, length, loop, mute, copy, delete). Every change is one undo step
@@ -70,7 +70,7 @@ export function createSoundEditor({ projectId, timeline, dur, time, seek, fps = 
       h('button', { class: 'ghost danger', onclick: async () => { if (!await confirmBox('Remove sound', h('div', {}, `Remove "${c.name}" from the film? (The file stays in the film’s vhaudio folder.)`), 'Remove')) return; remove(c.id); } }, '🗑 remove')));
   }
 
-  // ---- P4: sounds dropped on the timeline (library item or files from Explorer) or added from the library list
+  // ---- P4: sounds dropped on the timeline (library item or files from the Finder) or added from the library list
   // one file from the user's disk → the film's vhaudio/ (as a dataURL up to 35 MB, streamed raw above)
   async function uploadFile(f) {
     if (f.size > BIG) {

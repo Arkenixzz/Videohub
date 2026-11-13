@@ -22,8 +22,8 @@ Claude copies for a new film.
 
 VideoHub scans the folders listed in Settings → Folders ("roots"). A root has a type:
 
-- **container** — every sub-folder is a project (the default films folder, `<workspace>\films`, is one; the
-  workspace is chosen in setup, default `Documents\VideoHub`).
+- **container** — every sub-folder is a project (the default films folder, `<workspace>/films`, is one; the
+  workspace is chosen in setup, default `~/Documents/VideoHub`).
   Sub-folders named in `config.skipFolders` (default `tools, fonts, test, render, videos, thumbnails, assets`) and
   folders starting with `_` or `.` are skipped, unless they have their own `render.js`.
 - **project** — the folder itself is one project.
@@ -99,7 +99,7 @@ video** is the newest final (then web, then preview) — never a clip, part or s
 
 ## 4. Render scripts the queue understands
 
-The queue (`hub_render` / "🎬 Render" / `POST /api/jobs`) runs one render at a time on the PC. For a project with a
+The queue (`hub_render` / "🎬 Render" / `POST /api/jobs`) runs one render at a time on the Mac. For a project with a
 render script it runs, in the project folder:
 
 ```
@@ -108,7 +108,7 @@ node render.js <workers>          (render.mjs the same; render.py is listed but 
 
 with these environment variables: `DUR` (from `project.json` `render.env`, else the manifest, else worked out from
 existing chunks), `WK` (= workers), `ONLY` (partial renders), `PREVIEW=1` (preview mode), `FPS` (if the user picked
-one), `VIDEOHUB_ENCODER` (`auto | nvenc | amf | qsv | x264`: Settings → Render speed, or the render dialog; a script may
+one), `VIDEOHUB_ENCODER` (`auto | videotoolbox | x264`: Settings → Render speed, or the render dialog; a script may
 ignore it), `VIDEOHUB_JOB` (the job id) and `VIDEOHUB_DIR` (the VideoHub folder — e.g. to load its `puppeteer-core`).
 Any other `render.env` keys are passed too. Progress is read from stdout lines like `12/40 chunks to render` and
 `[w0] chunk 3 ok — 5 done` (also `chunk 3 ok  5/40  85s` and `w1] 120/600`).
@@ -155,7 +155,7 @@ Each render is saved as `<base>_vN.mp4` in the project (base = the latest film's
 folder name) and recorded in `.videohub/versions.json` (`v, file, kind, created, job, mode, parent, changedRanges,
 chunks, notes`). Registering a final also marks every older note that was still open/with Claude as `fixed`
 (the user re-checks them in the review's check tour). Each version is also hard-linked into the outputs folder
-(`<outputs>\YYYY-MM-DD\YYYY-MM-DD <title> vN.mp4`, no extra disk space). A video made outside the queue can be
+(`<outputs>/YYYY-MM-DD/YYYY-MM-DD <title> vN.mp4`, no extra disk space). A video made outside the queue can be
 registered with `hub_register_version`.
 
 ### 4.6 Studio scenes

@@ -1,33 +1,33 @@
 # VideoHub architecture
 
 A local Node 22 server (ES modules, no build step, two npm dependencies plus `puppeteer-core` for render scripts),
-a vanilla-JS UI served by it, an optional C# agent for render protection, and MCP tools for Claude.
+a vanilla-JS UI served by it, and MCP tools for Claude. This is the macOS port: everything that talks to the system
+(Finder, Trash, notifications, folder picker, processes, memory, graphics, login item) is in `server/mac.js`.
 What film projects must look like is in [PROJECT-CONTRACT.md](PROJECT-CONTRACT.md).
 
 ## Processes and lifetime
 - **Hub** — `server/hub.js`, HTTP on `127.0.0.1:7788` (UI + JSON API + server-sent events). It runs only while used:
   with no VideoHub window (SSE client), no queued/running job, no cleanup, no note pictures or review copies being made
-  and no render seen by the agent for 2 minutes (`VIDEOHUB_IDLE_SEC`), it asks the agent to quit and exits — unless
-  "Start with Windows" is on (then it stays up). The `hub_*` tools start it again when needed.
-- **Render protection** — `server/guard.js`, inside the hub (no separate program since Nov 2026: the old C# agent,
-  `guard/VideoHubAgent.exe`, was compiled on each PC and Windows Smart App Control blocked it as an unsigned app). The
-  queue reports every process it starts (`guardTrack`); protection gives that process tree a CPU limit (processor
-  affinity: a share of the cores) and low priority with `os.setPriority` and one short PowerShell script per change
-  (children started later inherit both), watches `os.freemem()` every 3 s and slows the newest render to the lowest
-  priority on a few cores when free RAM drops below `PauseMB` (every render below `CriticalMB`), back to normal when RAM
-  frees, oldest first. It runs while the hub is used and puts renders back to normal when the hub idles out. Settings
-  stay in `%APPDATA%\RenderGuard\settings.txt`; the old agent's `history.log` is still read. It no longer freezes
-  processes, has no hotkeys and does not see renders started outside the queue. `update.ps1` quits and removes an old
-  install's agent program.
+  and no render running for 2 minutes (`VIDEOHUB_IDLE_SEC`), it exits — unless "Start at login" (a LaunchAgent,
+  `~/Library/LaunchAgents/com.videohub.server.plist`) is on (then it stays up). The `hub_*` tools start it again when needed.
+- **Render protection** — `server/guard.js`, inside the hub. The queue reports every process it starts (`guardTrack`);
+  protection gives that process tree a lower priority (nice, through `os.setPriority` on every pid `ps` lists under it)
+  and, in the Quiet preset or slow mode, the background QoS (`taskpolicy -b`: on Apple Silicon the efficiency cores).
+  macOS has no processor affinity, so the Windows "share of the cores" is gone. Children started later inherit both. It
+  reads available RAM from `vm_stat` every 3 s (free + inactive + speculative pages; `os.freemem()` is useless on macOS,
+  which keeps free pages near zero on purpose) and slows the newest render when it drops below `PauseMB` (every render
+  below `CriticalMB`), back to normal when RAM frees, oldest first. Settings live in
+  `~/Library/Application Support/VideoHub/settings.txt`. It does not freeze processes and does not see renders started
+  outside the queue.
 - **MCP server** — `server/mcp.js` (stdio) exposes `server/tools.js`; `server/cli.js` runs the same tools from a shell;
   `server/mcp-selftest.js` checks the MCP wiring. Tools talk to the hub over HTTP (`VIDEOHUB_PORT` overrides the port).
 
 ## Map
 | File | Role |
 |---|---|
-| `server/config.js` | `data/config.json`: the workspace (`baseDir`: `VIDEOHUB_BASE_DIR` → `config.baseDir` → `Documents\VideoHub`; the folder defaults derive from it), roots, folders (outputs, sounds, archive, thumbnails, studio), `skipFolders`, render settings (`render.encoder`). First run: the films folder + discovered suggestions (off). An existing config keeps every value it has. |
+| `server/config.js` | `data/config.json`: the workspace (`baseDir`: `VIDEOHUB_BASE_DIR` → `config.baseDir` → `~/Documents/VideoHub`; the folder defaults derive from it), roots, folders (outputs, sounds, archive, thumbnails, studio), `skipFolders`, render settings (`render.encoder`). First run: the films folder + discovered suggestions (off). An existing config keeps every value it has. |
 | `scripts/init-config.mjs` | Setup's helper: what is decided already (`--state`), workspace checks, creating the workspace + README.txt and writing `config.json` (never overwriting a value), encoder detection (`--detect`), the example film (`--example`). `setup.ps1` only asks and passes the answers (`data/setup-answers.json` remembers them). |
-| `server/encoders.js` | Render encoders: which ones this PC can use (one tiny test encode each, cached in `data/encoders.json`; `GET /api/encoders`), their ffmpeg arguments (the template's `render.js` carries a copy, kept equal by a test), `VIDEOHUB_ENCODER` for jobs. See RENDER-SPEED.md. |
+| `server/encoders.js` | Render encoders: which ones this Mac can use (one tiny test encode each, cached in `data/encoders.json`; `GET /api/encoders`), their ffmpeg arguments (the template's `render.js` carries a copy, kept equal by a test), `VIDEOHUB_ENCODER` for jobs. See RENDER-SPEED.md. |
 | `server/legacy.js`, `ui/values.js` | Stored values (note/project/thumbnail statuses, note kinds) and the one place old Turkish values are mapped to English. |
 | `server/scan.js` | Projects under the roots, video roles, duplicates, card thumbnails; root watchers so soft scans re-walk only changed projects. |
 | `server/source-revision.js` | A project's code revision (live covers; 409 on stale covers). |
@@ -37,7 +37,7 @@ What film projects must look like is in [PROJECT-CONTRACT.md](PROJECT-CONTRACT.m
 | `server/media.js` | Film strip, waveform/peaks, full frames, review copies (`data/proxy`). |
 | `server/guard.js`, `ramhogs.js` | Agent state/commands/settings/history; programs holding RAM next to a render (never closes anything). |
 | `server/outputs.js`, `ciktilar.js`, `ciktilar-dir.js` | "Recent renders" list; the global outputs folder (hard links, one folder per day). |
-| `server/janitor.js` | Cleanup candidates (safe/deep), Recycle Bin, archive; one cleanup at a time. |
+| `server/janitor.js` | Cleanup candidates (safe/deep), Trash, archive; one cleanup at a time. |
 | `server/tools.js` | The `hub_*` tools. |
 | `server/transcript.js`, `layers.js`, `scenes.js` | Narration text, sound stems + cues, scene lane. |
 | `server/tweaks.js`, `sound.js`, `vhsound.mjs`, `soundedit.js`, `sfxlib.mjs`, `edit2d.js` | The film's `tweaks.json` (one writer), mix rebuilds, added sound clips, ready-made effects, 2D layers. |
@@ -54,13 +54,14 @@ What film projects must look like is in [PROJECT-CONTRACT.md](PROJECT-CONTRACT.m
   `ui/thumbstudio/catalog.js`, `prompt.js`). Open the pages after a UI change.
 - **Per-frame code** (review `tick()`, the live loop) must not read layout: reading `clientWidth` after a text change
   reflowed ~100 note cards every frame (10.6 ms → 0.4 ms after the fix).
-- **Never hard-delete.** Recycle Bin (refuse items bigger than the Bin) or archive (copy, verify, then remove; never
+- **Never hard-delete.** Trash (`mac.js` `trash`: NSFileManager via `osascript -l JavaScript`; a volume without a
+  Trash refuses the item, which stays) or archive (copy, verify, then remove; never
   overwrite, `_2`). The user approves every cleanup in the UI.
-- **Windows `fs.watch` reports reads as changes** (last-access time): count an event only when the mtime is really newer
+- **`fs.watch` may report reads as changes** (on Windows it did) (last-access time): count an event only when the mtime is really newer
   (`reallyChanged` in live.js, the same idea in scan.js).
 - **Note pictures are cut by ffmpeg** from the original video by frame number, never from the browser's `<video>`
   (comes back black) or the review copy. Live-preview notes send their frame from the page's canvases.
-- **One render at a time.** The queue also waits while the agent reports a render started elsewhere. Do not start
+- **One render at a time.** The queue also waits while protection reports another render. Do not start
   renders in parallel to test something.
 - **Render script speed** (`templates/new-film/render.js` = `examples/hello-film/render.js`, keep them equal): the raw
   canvas path is used only when it is pixel-identical to a screenshot; check with lossless renders (RENDER-SPEED.md)
@@ -81,8 +82,9 @@ What film projects must look like is in [PROJECT-CONTRACT.md](PROJECT-CONTRACT.m
 ## Testing
 - `npm test` (node:test suites, default folders pointed at `.test-tmp`), `node --check` on every changed file.
 - Test hubs: `VIDEOHUB_PORT=7799 VIDEOHUB_GUARD=off VIDEOHUB_JOBS=off VIDEOHUB_NO_WINDOW=1` (+ `VIDEOHUB_IDLE_SEC=600`,
-  `VIDEOHUB_BASE_DIR=<scratch>` so first-run folders go to a scratch folder). GUARD=off never touches the real agent,
-  JOBS=off never picks up the queue, NO_WINDOW opens no Explorer/Edge. The hub reads its config only from its own
+  `VIDEOHUB_BASE_DIR=<scratch>` so first-run folders go to a scratch folder). GUARD=off never touches render priorities,
+  JOBS=off never picks up the queue, NO_WINDOW opens no Finder, Chrome window, folder picker or notification. The hub reads its config only from its own
   `data/`, so a test with other roots needs a copy of the code (or a clone) with its own `data/`. When calling the CLI
   against a test hub, set `VIDEOHUB_PORT` in the same command — otherwise the tool talks to (or starts) a hub on 7788.
-- Agent: `guard/tests/run.ps1` (isolated `--only` copies).
+- macOS layer: `server/mac.test.js` (ps / vm_stat parsing, process trees, the LaunchAgent; the Trash test moves a real
+  file to your Trash, so it runs only with `VIDEOHUB_TEST_TRASH=1`).

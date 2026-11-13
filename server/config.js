@@ -1,5 +1,5 @@
 // Machine-local settings in data/config.json. Created on first run (or by setup: scripts/init-config.mjs), so the same
-// code works on any PC. Every folder VideoHub writes to has a default inside one workspace folder (baseDir: films,
+// code works on any Mac. Every folder VideoHub writes to has a default inside one workspace folder (baseDir: films,
 // outputs, sounds, thumbnails, archive; Documents\VideoHub unless setup chose another) and can be changed in Settings
 // or in data/config.json. See docs/MIGRATING.md for older installs.
 import fs from 'node:fs';
@@ -44,7 +44,7 @@ export function discoverRoots() {
       const p = path.join(top, e.name), lp = lower(p);
       if (lp === lower(baseDir())) continue;
       // skip folders that are a root, sit inside one, or contain one
-      if (roots.some(r => lower(r.path) === lp || lp.startsWith(lower(r.path) + '\\') || lower(r.path).startsWith(lp + '\\'))) continue;
+      if (roots.some(r => lower(r.path) === lp || lp.startsWith(lower(r.path) + path.sep) || lower(r.path).startsWith(lp + path.sep))) continue;
       if (fs.existsSync(path.join(p, 'server', 'hub.js'))) continue;   // a VideoHub install
       if (hasRenderCode(p)) { add(p, 'project', false); continue; }
       let subs = []; try { subs = fs.readdirSync(p, { withFileTypes: true }).filter(s => s.isDirectory() && !SKIP.has(s.name)); } catch { }

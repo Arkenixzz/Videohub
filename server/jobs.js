@@ -10,6 +10,7 @@ import { pickFolder as pickFolderWin } from './pickfolder.js';
 import { config } from './config.js';
 import { project, rescanProject } from './scan.js';
 import { guardState, guardTrack } from './guard.js';
+import { killTree } from './mac.js';
 import { ramHogsNow, ramNote } from './ramhogs.js';
 import { vhDir, list as listNotes, update as updateNote } from './notes.js';
 import { DATA_DIR, HUB_DIR, readJson, writeJson, run, TOOLS, now, pLimit, refersToHub, isInside } from './util.js';
@@ -81,7 +82,7 @@ export async function create(body) {
   if (!Number.isInteger(workers) || workers < 1 || workers > (p.studio ? 4 : 8)) throw Object.assign(new Error('Invalid number of render workers.'), { code: 400 });
   const job = { id: 'j' + Date.now().toString(36) + '-' + randomUUID().slice(0, 8), project: p.id, projectName: p.title || p.name, path: p.path, mode, state: 'queued', createdAt: now(), session: body.session || null, notes: body.notes || [], env: { ...rc.env, ...(body.env || {}) }, workers, progress: 0 };
   if (mode === 'partial') {
-    if (p.studio && !rc.chunkSec) throw Object.assign(new Error(`This 3D scene has no chunked render yet (out\\${p.name}\\render\\manifest.json). Render it in full once first: hub_render({mode:"full"}) or node make.mjs ${p.name}.`), { code: 400 });
+    if (p.studio && !rc.chunkSec) throw Object.assign(new Error(`This 3D scene has no chunked render yet (out/${p.name}/render/manifest.json). Render it in full once first: hub_render({mode:"full"}) or node make.mjs ${p.name}.`), { code: 400 });
     if (!p.studio && (p.family !== 'A' || !rc.chunkSec)) throw Object.assign(new Error(`Partial renders need a chunked render script (family A, see docs/PROJECT-CONTRACT.md) or a 3D studio scene; this project is "${p.family}". Use mode:"full", or mode:"command" with your own command.`), { code: 400 });
     let chunks = new Set(body.chunks || []);
     for (const [a, b] of body.seconds || []) for (let c = Math.floor(Math.max(0, a) / rc.chunkSec); c <= Math.floor(Math.max(a, b - 1e-6) / rc.chunkSec); c++) chunks.add(c);
@@ -100,7 +101,7 @@ export async function create(body) {
   }
   job.dur = +rc.env.DUR || null;
   if (body.copyTo && mode !== 'command') {
-    if (!path.isAbsolute(String(body.copyTo))) throw Object.assign(new Error('The copy folder must be a full path (e.g. D:\\Videos)'), { code: 400 });
+    if (!path.isAbsolute(String(body.copyTo))) throw Object.assign(new Error('The copy folder must be a full path (e.g. /Users/you/Movies)'), { code: 400 });
     job.copyTo = path.resolve(String(body.copyTo));
   }
   // big programs holding RAM (an Android emulator can take 8 GB of 16): hub_render tells Claude, Claude tells the user
@@ -153,7 +154,7 @@ function restoreChunks(job) {
     try { if (!fs.existsSync(f) && fs.existsSync(b)) { fs.mkdirSync(chunkDir(p), { recursive: true }); fs.renameSync(b, f); } } catch { }
   }
 }
-// a free name for `f` (x, x_2, x_3 ...): renames never overwrite, and renaming a folder onto an existing one fails on Windows
+// a free name for `f` (x, x_2, x_3 ...): renames never overwrite (a folder renamed onto an empty one would replace it)
 const freeName = f => { const ext = path.extname(f), b = f.slice(0, f.length - ext.length); let d = f; for (let i = 2; fs.existsSync(d); i++) d = `${b}_${i}${ext}`; return d; };
 
 function assertActive(job) {
@@ -169,12 +170,14 @@ function setPhase(job, phase) {
   job.phase = phase; job.phaseStartedAt = Date.now(); emit('progress', job);
 }
 
+// a hub started from the Dock or at login has a short PATH: render scripts must still find Homebrew's ffmpeg
+const withBrew = (p = '') => [...new Set(['/opt/homebrew/bin', '/usr/local/bin', ...String(p).split(':').filter(Boolean)])].join(':');
 function spawnLogged(job, cmd, args, opts = {}) {
   assertActive(job);
   return new Promise((resolve) => {
     const log = fs.createWriteStream(job.log, { flags: 'a' });
     log.write(`\n# ${now()}  ${cmd} ${args.join(' ')}\n`);
-    const child = spawn(cmd, args, { ...opts, windowsHide: true, shell: opts.shell || false });
+    const child = spawn(cmd, args, { ...opts, shell: opts.shell || false });
     const children = procs.get(job.id) || new Set(); children.add(child); procs.set(job.id, children);
     job.pid = child.pid; guardTrack(child.pid, { cwd: opts.cwd || '', project: job.projectName || '', what: job.mode || '' }); emit('running', job);
     let q0 = null, done = 0, t0 = Date.now(), stdout = '', stderr = '', settled = false;
@@ -216,14 +219,14 @@ async function runJob(job) {
   assertActive(job);
   // VIDEOHUB_DIR: render scripts may load puppeteer-core from VideoHub's node_modules; VIDEOHUB_ENCODER: the encoder chosen in
   // setup/Settings (render.encoder) unless the job sets its own (scripts that do not read it are not affected)
-  const env = { ...process.env, ...(job.workers ? { WK: String(job.workers) } : {}), ...encoderEnv(job.env, config().render?.encoder), ...job.env, VIDEOHUB_JOB: job.id, VIDEOHUB_DIR: HUB_DIR };
+  const env = { ...process.env, PATH: withBrew(process.env.PATH), ...(job.workers ? { WK: String(job.workers) } : {}), ...encoderEnv(job.env, config().render?.encoder), ...job.env, VIDEOHUB_JOB: job.id, VIDEOHUB_DIR: HUB_DIR };
   const versions = readJson(path.join(vhDir(p), 'versions.json'), []);
   const vN = Math.max(versions.reduce((m, v) => Math.max(m, v.v || 0), 0), maxNameVersion(p)) + 1;
 
   if (job.mode === 'command') {
     setPhase(job, 'render');
-    // quoted whole and passed verbatim: Node would escape inner quotes as \" which cmd.exe does not understand
-    const { code } = await spawnLogged(job, 'cmd.exe', ['/d', '/s', '/c', '"' + job.cmd + '"'], { cwd: p.path, env, windowsVerbatimArguments: true });
+    // the user's login shell setup (zsh -l), so Homebrew's tools and their own PATH work as in Terminal
+    const { code } = await spawnLogged(job, '/bin/zsh', ['-lc', job.cmd], { cwd: p.path, env });
     assertActive(job);
     if (code !== 0) throw new Error(`The command ended with code ${code} (log: ${job.log})`);
     if (job.output) await register(p, job, path.resolve(p.path, job.output), vN, job.changedRanges || null);
@@ -404,7 +407,7 @@ export function cancel(id) {
   if (!['queued', 'running'].includes(j.state)) return false;
   if (j.state === 'queued') { j.state = 'cancelled'; j.finishedAt = now(); emit('cancelled', j); return true; }
   const children = procs.get(id); if (children) for (const c of children) if (c.pid) {
-    spawn('taskkill', ['/PID', String(c.pid), '/T', '/F'], { windowsHide: true }).on('error', () => { try { c.kill(); } catch { } });
+    killTree(c.pid).catch(() => { try { c.kill('SIGKILL'); } catch { } });
   }
   j.state = 'cancelled'; j.finishedAt = now(); emit('cancelled', j); return true;
 }
@@ -446,7 +449,7 @@ async function renderInfo(p) {
 }
 async function renderOptions0(p) {
   const rc = await recipe(p);
-  if (p.studio) return { studio: true, partial: !!rc.chunkSec, preview: false, fps: null, workers: { default: rc.workers, max: 4 }, codecs: ['auto', 'x264', 'nvenc', 'amf'], dur: +rc.env.DUR || null };
+  if (p.studio) return { studio: true, partial: !!rc.chunkSec, preview: false, fps: null, workers: { default: rc.workers, max: 4 }, codecs: ['auto', 'x264', 'videotoolbox'], dur: +rc.env.DUR || null };
   let src = ''; try { src = fs.readFileSync(path.join(p.path, rc.script), 'utf8'); } catch { }
   const env = new Set([...src.matchAll(/process\.env\.([A-Z_]+)/g)].map(m => m[1]));
   return { studio: false, script: fs.existsSync(path.join(p.path, rc.script)) ? rc.script : null, partial: p.family === 'A' && !!rc.chunkSec,

@@ -30,18 +30,21 @@ Everything VideoHub reads from the script is unchanged: `FPS`, `CH`, `VW`, `VH`,
 `rendered N frames in S s (F fps, encoder E)`.
 
 ## Choosing the encoder
-`VIDEOHUB_ENCODER` = `auto` | `nvenc` | `amf` | `qsv` | `x264` (default `auto`).
-- `auto` tries a tiny test encode with NVIDIA NVENC, then AMD AMF, then Intel Quick Sync, and uses the first that
-  works; otherwise x264 on the processor. A named encoder that does not work on the PC falls back to x264 (and says so).
-- VideoHub passes the choice from setup / **Settings → Render speed** (`render.encoder` in `data\config.json`) to every
-  render job, unless the job sets its own (the render dialog's *Encoder*). Scripts that ignore the variable are not
-  affected. `GET /api/encoders` (and `node scripts\init-config.mjs --detect`) shows what this PC can use; the result is
-  cached in `data\encoders.json` (`?refresh=1` probes again, e.g. after a driver update).
+`VIDEOHUB_ENCODER` = `auto` | `videotoolbox` | `x264` (default `auto`). **Mac version:** the measurements below were made
+on Windows with the Windows encoders (NVENC/AMF/QSV), which do not exist on a Mac; they are kept for reference.
+- `auto` tries a tiny test encode with Apple's hardware encoder (VideoToolbox: constant quality `-q:v`, which Apple
+  Silicon supports; else a high bit rate for Intel Macs) and uses it when it works; otherwise x264 on the processor. A
+  named encoder that does not work on the Mac falls back to x264 (and says so).
+- VideoHub passes the choice from setup / **Settings → Render speed** (`render.encoder` in `data/config.json`) to every
+  render script as `VIDEOHUB_ENCODER`; a job's own `VIDEOHUB_ENCODER` wins, and scripts that do not read it are not
+  affected. `GET /api/encoders` (and `node scripts/init-config.mjs --detect`) shows what this Mac can use; the result is
+  cached in `data/encoders.json` (`?refresh=1` probes again, e.g. after an ffmpeg update).
 - `lossless` (libx264rgb, qp 0) exists for checks only: huge files.
 
 | Encoder | Arguments | Status |
 |---|---|---|
 | x264 | `-c:v libx264 -preset veryfast -crf 16` | unchanged from before |
+| VideoToolbox | `-c:v h264_videotoolbox -q:v 65 -profile:v high -allow_sw 0 -realtime 0`, else `-b:v 40M -maxrate 80M -bufsize 80M` (Intel Macs) | **unverified**: not yet measured against a lossless reference (see "Checking quality yourself" below); pick x264 when in doubt |
 | AMF | `-c:v h264_amf -usage transcoding -quality quality -rc cqp -qp_i 14 -qp_p 16 -qp_b 18 -bf 3` (without `-bf 3` when the card rejects it) | **measured** (below) |
 | NVENC | `-c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq 20 -b:v 0 -maxrate 250M -bufsize 500M -level 5.2 -spatial-aq 1 -temporal-aq 1 -rc-lookahead 32 -bf 3 -b_ref_mode middle` | **unverified here**: measured on another PC (VMAF 94.48 vs x264 medium crf 15 at 94.25, ~25 % smaller); without `-level 5.2` and a high maxrate NVENC hit a ~40 Mbit/s ceiling on grainy 1080p60 |
 | QSV | `-c:v h264_qsv -preset veryslow -global_quality 18 -look_ahead 1` | **unverified**: a starting point, never measured |

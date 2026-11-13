@@ -7,7 +7,7 @@
 // The first run takes everything already there as seen, so only renders from now on show up as new.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { notify as macNotify } from './mac.js';
 import { index, project } from './scan.js';
 import * as jobs from './jobs.js';
 import { guardHistory } from './guard.js';
@@ -79,7 +79,7 @@ function collect() {
     if (secs < 60) continue;
     // already in the list: a render of the same folder that ended within 15 min (the queue's own, or a version a chat registered)
     const at = Date.parse(g.at) || 0, seg = String(g.project || '').split(/[\\/]/).pop().toLowerCase();
-    if (seg && out.some((x) => x.file && x.file.toLowerCase().includes('\\' + seg + '\\') && Math.abs((Date.parse(x.finishedAt) || 0) - at) < 15 * 60e3)) continue;
+    if (seg && out.some((x) => x.file && x.file.toLowerCase().includes('/' + seg + '/') && Math.abs((Date.parse(x.finishedAt) || 0) - at) < 15 * 60e3)) continue;
     out.push({ key: 'guard:' + g.at + g.project, source: 'RenderGuard', state: /^FINISHED/i.test(g.event) ? 'done' : 'failed', file: null, projectName: g.project, finishedAt: iso(g.at),
       session: g.session || null, manual: !g.session, mode: null, error: /^FINISHED/i.test(g.event) ? null : g.event, detail: g.detail });
   }
@@ -102,21 +102,13 @@ export function outputs(limit = 150) {
   for (const it of all) it.isNew = it.state === 'done' && !!it.exists && !s[it.key];
   return { items: all.slice(0, limit), unseen: all.filter((x) => x.isNew).length, active: active() };
 }
-export function markSeen(key) { const s = seenMap() || (seen = {}); if (key) s[key.includes(':') && !/^[a-z]:\\/i.test(key) ? key : keyOf(key)] = new Date().toISOString(); saveSeen(); }
+export function markSeen(key) { const s = seenMap() || (seen = {}); if (key) s[key.includes(':') && !key.startsWith('/') ? key : keyOf(key)] = new Date().toISOString(); saveSeen(); }
 export function markAllSeen() { const s = seenMap() || (seen = {}); for (const it of collect()) if (it.exists) s[it.key] = s[it.key] || new Date().toISOString(); saveSeen(); }
 
-// a Windows notification (the hub's PC): render finished or failed. Nothing on test hubs.
-export function notifyWindows(title, body) {
+// a Mac notification (Notification Centre): render finished or failed. Nothing on test hubs.
+export function notify(title, body) {
   if (process.env.VIDEOHUB_NO_WINDOW) return;
-  const q = (s) => "'" + String(s || '').replace(/'/g, "''").slice(0, 200) + "'";
-  const ps = [
-    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
-    '$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
-    '$t = $x.GetElementsByTagName("text")', `$t.Item(0).AppendChild($x.CreateTextNode(${q(title)})) | Out-Null`, `$t.Item(1).AppendChild($x.CreateTextNode(${q(body)})) | Out-Null`,
-    '$n = [Windows.UI.Notifications.ToastNotification]::new($x)',
-    '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe").Show($n)',
-  ].join('; ');
-  try { spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { windowsHide: true, stdio: 'ignore', detached: true }).unref(); } catch { }
+  macNotify(String(title || '').slice(0, 200), String(body || '').slice(0, 200));
 }
 
 export function routes(route, readBody) {

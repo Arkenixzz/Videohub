@@ -14,7 +14,7 @@ const code = fs.readFileSync(new URL('./jobs.js', import.meta.url), 'utf8')
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 function harness() {
   const base = path.resolve('.test-tmp', 'queue-fixture');
-  const files = new Set(), children = [], timers = [], events = [], log = [];
+  const files = new Set(), children = [], timers = [], events = [], log = [], kills = [];
   let pid = 100, workers = 1, maxParallel = 1, guard = { running: false }, encoder = 'auto';
   const projects = new Map(['p1', 'p2'].map(id => [id, { id, name: id, path: path.join(base, id), studio: base, outDir: path.join(base, 'out', id), outputs: [], render: {} }]));
   const spawn = (cmd, args, opts) => {
@@ -25,7 +25,7 @@ function harness() {
   const ctx = {
     fs: { existsSync: file => files.has(file), mkdirSync: dir => files.add(dir),
       readdirSync: dir => [...files].filter(file => path.dirname(file) === dir).map(file => path.basename(file)),
-      renameSync: (a, b) => { if (files.has(b)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); for (const x of [...files]) if (x === a || x.startsWith(a + path.sep)) { files.delete(x); files.add(b + x.slice(a.length)); } },   // like Windows: never onto an existing name
+      renameSync: (a, b) => { if (files.has(b)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); for (const x of [...files]) if (x === a || x.startsWith(a + path.sep)) { files.delete(x); files.add(b + x.slice(a.length)); } },   // never onto an existing name (the queue never relies on replacing one)
       writeFileSync: file => files.add(file), appendFileSync() {}, copyFileSync: (a, b) => files.add(b),
       createWriteStream: () => ({ write: value => log.push(String(value)), end() {} }),
       promises: { copyFile: async (a, b) => files.add(b) } },
@@ -34,7 +34,7 @@ function harness() {
     readJson: (file, fallback) => file.endsWith('project.json') ? { render: { workers } }
       : file.endsWith('manifest.json') ? { dur: 2, fps: 60, chunkFrames: 120, chunkSec: 2 } : fallback,
     writeJson() {}, config: () => ({ maxParallelRenders: maxParallel, render: { encoder } }), ENCODERS, LABELS, encoderEnv, project: id => projects.get(id),
-    guardState: () => guard, guardTrack: () => { }, ramHogsNow: async () => [], ramNote: () => null,
+    guardState: () => guard, guardTrack: () => { }, killTree: async pid => { kills.push(pid); return [pid]; }, ramHogsNow: async () => [], ramNote: () => null,
     vhDir: p => path.join(p.path, '.videohub'), listNotes: () => [], updateNote() {},
     linkOutput: () => null, rescanProject: async () => {}, now: () => new Date().toISOString(),
     pLimit: async (items, n, fn) => Promise.all(items.map(fn)), pickFolderWin() {},
@@ -42,7 +42,7 @@ function harness() {
   };
   vm.createContext(ctx); vm.runInContext(code + '\nglobalThis.queue = {create,cancel,approve,get,pump,spawnLogged,runJob,recipe,procs,executing,onJob};', ctx);
   ctx.queue.onJob(event => events.push(event));
-  return { ...ctx.queue, children, events, files, log, projects, timers,
+  return { ...ctx.queue, children, events, files, kills, log, projects, timers,
     setWorkers: value => { workers = value; }, setGuard: value => { guard = value; }, setParallel: value => { maxParallel = value; }, setEncoder: value => { encoder = value; },
     async close(child, output = '', status = 0) {
       if (status === 0) {
@@ -120,7 +120,7 @@ test('cancelled render retains the queue slot until child exit and stays cancell
   const h = harness(), job = await h.create({ project: 'p1', mode: 'full' }); await flush();
   const child = h.children[0]; assert.equal(h.cancel(job.id), true);
   assert.equal(h.get(job.id).state, 'cancelled'); assert.equal(h.executing.size, 1);
-  assert.equal(h.children.at(-1).cmd, 'taskkill');
+  assert.deepEqual(h.kills, [child.pid]);   // the whole process tree of the render
   await h.close(child, '', 1); assert.equal(h.get(job.id).state, 'cancelled'); assert.equal(h.executing.size, 0);
   assert.equal(h.events.some(e => e.type === 'failed'), false); assert.equal(h.cancel(job.id), false);
 });
@@ -129,7 +129,7 @@ test('cancellation during mux kills that process and does not register an output
   const h = harness(), job = await h.create({ project: 'p1', mode: 'full' }); await flush();
   await h.close(h.children[0]); await h.close(h.children.at(-1));
   const mux = h.children.at(-1); assert.ok(mux.args.includes('--mux'));
-  h.cancel(job.id); const kill = h.children.at(-1); assert.equal(kill.args[1], String(mux.pid));
+  h.cancel(job.id); assert.equal(h.kills.at(-1), mux.pid);
   await h.close(mux, '', 1); assert.equal(h.get(job.id).state, 'cancelled'); assert.equal(h.get(job.id).output, undefined);
 });
 
@@ -153,7 +153,7 @@ test('spawn errors settle once and invalid worker counts are rejected before sta
   assert.equal((await result).code, -1); assert.equal(h.procs.size, 0);
 });
 
-test('unknown modes are rejected; command mode hands cmd.exe the command quoted and verbatim', async () => {
+test('unknown modes are rejected; command mode hands the command to a zsh login shell as one argument', async () => {
   const h = harness();
   await assert.rejects(h.create({ project: 'p1', mode: 'fulll' }), error => error.code === 400); assert.equal(h.children.length, 0);
   const cmd = 'node -e "console.log(process.argv.slice(1))" "a b" c';
@@ -161,8 +161,8 @@ test('unknown modes are rejected; command mode hands cmd.exe the command quoted 
   const held = await h.create({ project: 'p1', mode: 'command', cmd }); await flush();
   assert.equal(held.needsApproval, true); assert.equal(h.children.length, 0); assert.ok(h.events.some(e => e.type === 'approval'));
   assert.equal(h.approve('nope'), false); assert.equal(h.approve(held.id), true); assert.equal(h.approve(held.id), false); await flush();
-  const child = h.children[0]; assert.equal(child.cmd, 'cmd.exe');
-  assert.deepEqual([...child.args], ['/d', '/s', '/c', '"' + cmd + '"']); assert.equal(child.opts.windowsVerbatimArguments, true);
+  const child = h.children[0]; assert.equal(child.cmd, '/bin/zsh');
+  assert.deepEqual([...child.args], ['-lc', cmd]); assert.match(child.opts.env.PATH, /^\/opt\/homebrew\/bin:\/usr\/local\/bin/);
 });
 
 test('a full render after a failed one takes a free backup name instead of failing on the existing one', async () => {
@@ -206,10 +206,10 @@ test('renders by path: a film in Documents\\VideoHub\\films is not ours; one wai
 });
 
 test('render scripts get the encoder from Settings as VIDEOHUB_ENCODER, unless the job sets its own', async () => {
-  const h = harness(), project = h.projects.get('p1'); project.studio = null; h.setEncoder('amf');
+  const h = harness(), project = h.projects.get('p1'); project.studio = null; h.setEncoder('videotoolbox');
   await h.create({ project: 'p1', mode: 'full', workers: 1 }); await flush();
-  assert.equal(h.children[0].opts.env.VIDEOHUB_ENCODER, 'amf'); assert.equal(h.children[0].opts.env.WK, '1');
-  const h2 = harness(); h2.projects.get('p1').studio = null; h2.setEncoder('amf');
+  assert.equal(h.children[0].opts.env.VIDEOHUB_ENCODER, 'videotoolbox'); assert.equal(h.children[0].opts.env.WK, '1');
+  const h2 = harness(); h2.projects.get('p1').studio = null; h2.setEncoder('videotoolbox');
   await h2.create({ project: 'p1', mode: 'full', env: { VIDEOHUB_ENCODER: 'x264' } }); await flush();
   assert.equal(h2.children[0].opts.env.VIDEOHUB_ENCODER, 'x264');
 });

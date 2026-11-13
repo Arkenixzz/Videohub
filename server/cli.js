@@ -1,5 +1,5 @@
 // Same tools as the MCP server, for sessions that do not have it:
-//   node server/cli.js hub_notes '{"project":"C:\\path\\to\\film"}'
+//   node server/cli.js hub_notes '{"project":"/Users/you/Documents/VideoHub/films/my-film"}'
 //   node server/cli.js list
 import { TOOLS } from './tools.js';
 

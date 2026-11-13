@@ -14,7 +14,7 @@ const INDEX = path.join(DATA_DIR, 'index.json');
 
 // ---------- what a single file is
 function category(rel, name) {
-  const r = '\\' + rel.toLowerCase();
+  const r = '\\' + rel.toLowerCase().replace(/\//g, '\\');   // the rules below use \ as the separator
   if (/\\render\\profiles\\|\\profiles\\w\d|\\chrome-profile/.test(r)) return 'profile';
   if (/\\chunks_(prev|v\d)[^\\]*\\/.test(r)) return 'oldChunk';
   if (/\\chunks\\/.test(r) || /^c_\d{3,}\.mp4$/i.test(name)) return 'chunk';
@@ -77,7 +77,7 @@ const SIM_FILE = path.join(DATA_DIR, 'similar-cache.json');
 const simCache = readJson(SIM_FILE, {});
 async function tinyFrame(file, t) {
   const r = await new Promise(res => {
-    const p = spawn(TOOLS.ffmpeg, ['-v', 'error', '-ss', t.toFixed(2), '-i', file, '-frames:v', '1', '-vf', 'scale=16:9,format=gray', '-f', 'rawvideo', '-'], { windowsHide: true });
+    const p = spawn(TOOLS.ffmpeg, ['-v', 'error', '-ss', t.toFixed(2), '-i', file, '-frames:v', '1', '-vf', 'scale=16:9,format=gray', '-f', 'rawvideo', '-'], {});
     const bufs = []; p.stdout.on('data', b => bufs.push(b)); p.on('close', () => res(Buffer.concat(bufs))); p.on('error', () => res(Buffer.alloc(0)));
   });
   return r.length === 144 ? r : null;
@@ -107,7 +107,7 @@ function roleOf(o) {
   return 'final';
 }
 
-// Short test renders and QA clips (e.g. 3-second checks in qa\ with sound) are not films: they must never
+// Short test renders and QA clips (e.g. 3-second checks in qa/ with sound) are not films: they must never
 // become the project's last video, the name of the next version or the sound source of a partial render.
 // A voiced file is a "clip" when it is under half the film's length, sits in a test folder or is named like one —
 // unless VideoHub registered it as a version (versions.json), which is always a film.
@@ -117,7 +117,7 @@ function markClips(outs, filmDur, registered) {
   for (const o of outs) {
     if (!['final', 'web', 'preview'].includes(o.role) || registered.has(o.rel.toLowerCase())) continue;
     const short = filmDur >= 20 && (o.info.dur || 0) < filmDur * 0.5;
-    if (short || CLIP_DIRS.test('\\' + o.rel) || CLIP_NAME.test(o.name.replace(/\.[^.]+$/, ''))) o.role = 'clip';
+    if (short || CLIP_DIRS.test('\\' + o.rel.replace(/\//g, '\\')) || CLIP_NAME.test(o.name.replace(/\.[^.]+$/, ''))) o.role = 'clip';
   }
 }
 // the newest film; files written within 2 min of each other (a copy, a touched file) go by version number
@@ -398,7 +398,7 @@ export function setNoteCounts(id, notes) {
   emit({ type: 'notes', id });
 }
 
-// a project leaves the list at once (hidden, or its folder went to the Recycle Bin)
+// a project leaves the list at once (hidden, or its folder went to the Trash)
 export function dropProject(id) {
   state.projects = state.projects.filter(x => x.id !== id);
   writeJson(INDEX, { at: state.at, projects: state.projects });

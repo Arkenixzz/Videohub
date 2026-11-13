@@ -17,33 +17,32 @@ test('the render script template and its example copy use the same encoder argum
   assert.equal(fs.readFileSync(new URL('../templates/new-film/render.js', import.meta.url), 'utf8'), fs.readFileSync(new URL('../examples/hello-film/render.js', import.meta.url), 'utf8'));
 });
 
-test('pickEncoder: auto takes the first GPU encoder whose probe works, else x264; a named one that fails falls back', async () => {
+test('pickEncoder: auto takes the Mac encoder when its probe works, else x264; a named one that fails falls back', async () => {
   const probe = ok => async n => ok.includes(n) ? ENCODER_ARGS[n].at(-1) : null;
-  assert.equal((await pickEncoder('auto', probe(['amf', 'qsv']))).name, 'amf');
-  assert.equal((await pickEncoder('auto', probe(['nvenc', 'amf']))).name, 'nvenc');
+  assert.equal((await pickEncoder('auto', probe(['videotoolbox']))).name, 'videotoolbox');
   const none = await pickEncoder('auto', probe([])); assert.equal(none.name, 'x264'); assert.equal(none.why, null); assert.deepEqual(none.args, ENCODER_ARGS.x264[0]);
-  const want = await pickEncoder('nvenc', probe(['amf'])); assert.equal(want.name, 'x264'); assert.match(want.why, /nvenc is not available/);
-  assert.equal((await pickEncoder('amf', probe(['amf']))).args.at(1), 'h264_amf');
+  const want = await pickEncoder('videotoolbox', probe([])); assert.equal(want.name, 'x264'); assert.match(want.why, /videotoolbox is not available/);
+  assert.equal((await pickEncoder('videotoolbox', probe(['videotoolbox']))).args.at(1), 'h264_videotoolbox');
   assert.equal((await pickEncoder('auto', async () => { throw new Error('ffmpeg missing'); })).name, 'x264');   // a probe that throws counts as "no"
-  assert.equal((await pickEncoder('warp9', probe(['qsv']))).name, 'qsv');   // unknown → auto
+  assert.equal((await pickEncoder('nvenc', probe(['videotoolbox']))).name, 'videotoolbox');   // unknown (a Windows name) → auto
   let probed = 0; assert.equal((await pickEncoder('x264', async () => { probed++; return []; })).name, 'x264'); assert.equal(probed, 0);
-  assert.deepEqual(PROBE_ORDER, ['nvenc', 'amf', 'qsv']); assert.deepEqual(ENCODERS, ['auto', 'nvenc', 'amf', 'qsv', 'x264']);
+  assert.deepEqual(PROBE_ORDER, ['videotoolbox']); assert.deepEqual(ENCODERS, ['auto', 'videotoolbox', 'x264']);
 });
 
 test('detectEncoders probes once and caches (memory and file, keyed by the ffmpeg binary)', async () => {
   const dir = new URL('../.test-tmp/encoders-cache/', import.meta.url); fs.mkdirSync(dir, { recursive: true });
   const cacheFile = new URL('cache.json', dir).pathname.replace(/^\/(\w:)/, '$1'); try { fs.renameSync(cacheFile, cacheFile + '.' + Date.now()); } catch { }
-  let calls = 0; const probe = async n => { calls++; return n === 'amf' ? ['x'] : null; }, gpus = async () => ['Some GPU'];
+  let calls = 0; const probe = async n => { calls++; return n === 'videotoolbox' ? ['x'] : null; }, gpus = async () => ['Some GPU'];
   const a = await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus });
-  assert.deepEqual(a.available, ['amf', 'x264']); assert.equal(a.best, 'amf'); assert.deepEqual(a.gpus, ['Some GPU']); assert.equal(calls, 3);
-  await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus }); assert.equal(calls, 3);
-  assert.equal(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).v.best, 'amf');
+  assert.deepEqual(a.available, ['videotoolbox', 'x264']); assert.equal(a.best, 'videotoolbox'); assert.deepEqual(a.gpus, ['Some GPU']); assert.equal(calls, 1);
+  await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus }); assert.equal(calls, 1);
+  assert.equal(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).v.best, 'videotoolbox');
   const b = await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe: async () => null, gpus, refresh: true }); assert.deepEqual(b.available, ['x264']);
 });
 
 test('render jobs get the configured encoder unless the job sets its own', () => {
-  assert.deepEqual(encoderEnv({}, 'amf'), { VIDEOHUB_ENCODER: 'amf' });
-  assert.deepEqual(encoderEnv({ VIDEOHUB_ENCODER: 'x264' }, 'amf'), {});
+  assert.deepEqual(encoderEnv({}, 'videotoolbox'), { VIDEOHUB_ENCODER: 'videotoolbox' });
+  assert.deepEqual(encoderEnv({ VIDEOHUB_ENCODER: 'x264' }, 'videotoolbox'), {});
   assert.deepEqual(encoderEnv({}, undefined), { VIDEOHUB_ENCODER: 'auto' }); assert.deepEqual(encoderEnv({}, 'bogus'), { VIDEOHUB_ENCODER: 'auto' });
 });
 
@@ -52,18 +51,18 @@ function renderScript(env, works) {
   const src = fs.readFileSync(new URL('../templates/new-film/render.js', import.meta.url), 'utf8');
   const head = src.slice(0, src.indexOf('(async () => {')), spawned = [], probed = [];
   const cp = { spawn: (cmd, args) => { spawned.push(args); return {}; }, execFileSync() { }, spawnSync: (cmd, args) => { const c = args[args.indexOf('-c:v') + 1]; probed.push(c); return { status: works.some(w => c.includes(w)) ? 0 : 1 }; } };
-  const ctx = { require: m => m === 'child_process' ? cp : m === 'fs' ? fs : m === 'path' ? path : m === 'os' ? { homedir: () => 'X:\home' } : m === 'url' ? { pathToFileURL: x => x } : {}, process: { env, argv: [] }, console: { log() { }, error() { } }, Buffer, URL, __dirname: '.' };
+  const ctx = { require: m => m === 'child_process' ? cp : m === 'fs' ? fs : m === 'path' ? path : m === 'os' ? { homedir: () => '/Users/nobody' } : m === 'url' ? { pathToFileURL: x => x } : {}, process: { env, argv: [] }, console: { log() { }, error() { } }, Buffer, URL, __dirname: '.' };
   vm.createContext(ctx); vm.runInContext(head + '\nglobalThis.api = { pickEncoder, encoder, setEnc: e => { ENC = e; } };', ctx);
   return { ...ctx.api, spawned, probed };
 }
-test('render.js: auto probes nvenc, amf, qsv in that order and falls back to x264; raw input with BT.601 conversion', () => {
-  let r = renderScript({}, ['amf']); assert.equal(r.pickEncoder().name, 'amf'); assert.deepEqual(r.probed, ['h264_nvenc', 'h264_amf']);
-  r = renderScript({}, []); assert.equal(r.pickEncoder().name, 'x264'); assert.deepEqual(r.probed, ['h264_nvenc', 'h264_amf', 'h264_amf', 'h264_qsv']);   // amf: with and without B-frames
-  r = renderScript({ VIDEOHUB_ENCODER: 'nvenc' }, ['amf']); assert.equal(r.pickEncoder().name, 'x264');
-  r = renderScript({ VIDEOHUB_ENCODER: 'x264' }, ['nvenc']); assert.equal(r.pickEncoder().name, 'x264'); assert.equal(r.probed.length, 0);
-  r = renderScript({ VIDEOHUB_ENCODER: 'amf' }, ['amf']); r.setEnc(r.pickEncoder()); r.encoder('raw', 'c_000.mp4.tmp.mp4');
+test('render.js: auto probes VideoToolbox (constant quality, then bit rate) and falls back to x264; raw input with BT.601 conversion', () => {
+  let r = renderScript({}, ['videotoolbox']); assert.equal(r.pickEncoder().name, 'videotoolbox'); assert.deepEqual(r.probed, ['h264_videotoolbox']);
+  r = renderScript({}, []); assert.equal(r.pickEncoder().name, 'x264'); assert.deepEqual(r.probed, ['h264_videotoolbox', 'h264_videotoolbox']);   // -q:v, then -b:v
+  r = renderScript({ VIDEOHUB_ENCODER: 'videotoolbox' }, []); assert.equal(r.pickEncoder().name, 'x264');
+  r = renderScript({ VIDEOHUB_ENCODER: 'x264' }, ['videotoolbox']); assert.equal(r.pickEncoder().name, 'x264'); assert.equal(r.probed.length, 0);
+  r = renderScript({ VIDEOHUB_ENCODER: 'videotoolbox' }, ['videotoolbox']); r.setEnc(r.pickEncoder()); r.encoder('raw', 'c_000.mp4.tmp.mp4');
   const a = [...r.spawned[0]], at = k => a[a.indexOf(k) + 1];
-  assert.equal(at('-f'), 'rawvideo'); assert.equal(at('-pix_fmt'), 'rgba'); assert.equal(at('-s'), '1920x1080'); assert.equal(at('-c:v'), 'h264_amf');
+  assert.equal(at('-f'), 'rawvideo'); assert.equal(at('-pix_fmt'), 'rgba'); assert.equal(at('-s'), '1920x1080'); assert.equal(at('-c:v'), 'h264_videotoolbox');
   assert.match(at('-vf'), /out_color_matrix=bt601/); assert.equal(a.at(-1), 'c_000.mp4.tmp.mp4');
   r = renderScript({ PREVIEW: '1' }, []); r.setEnc(r.pickEncoder()); r.encoder('png', 'x.mp4'); const b = [...r.spawned[0]];
   assert.equal(b[b.indexOf('-c:v') + 1], 'png'); assert.equal(b[b.indexOf('-framerate') + 1], '30');

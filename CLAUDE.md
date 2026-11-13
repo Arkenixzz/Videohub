@@ -1,72 +1,76 @@
 # VideoHub: notes for Claude working on this repo
 
-Local Windows hub for videos written as code (catalog, live preview with no render, review notes, protected render
-queue, MCP tools). Node 22+, ES modules, no build step, vanilla-JS UI, optional C# agent. Architecture, map and the
+Local Mac hub (a macOS port of the Windows original) for videos written as code (catalog, live preview with no render, review notes, protected render
+queue, MCP tools). Node 22+, ES modules, no build step, vanilla-JS UI. Everything that talks to macOS (Finder, Trash, notifications, folder picker, processes, memory,
+login item) is in `server/mac.js`. Architecture, map and the
 pitfalls behind past bugs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). What a film project must look like:
 [docs/PROJECT-CONTRACT.md](docs/PROJECT-CONTRACT.md).
 
 ## Installing VideoHub for the user
-When the user opened this folder in Claude Code and asks to install, set up or "kur" VideoHub (and `data\config.json`
-does not exist yet, or they ask to redo it), you do the install for them. They may know nothing about computers:
-work one step at a time, in their language, say in one sentence what a step is for before you run it, and never ask
-them to type a command. Do not change VideoHub's code during an install and touch nothing outside what is listed here.
+When the user opened this folder in Claude Code and asks to install, set up or "installe" VideoHub (and
+`data/config.json` does not exist yet, or they ask to redo it), you do the install for them. They may know nothing about
+computers: work one step at a time, in their language, say in one sentence what a step is for before you run it, and
+never ask them to type a command, except where macOS needs their password (Homebrew). Do not change VideoHub's code
+during an install and touch nothing outside what is listed here.
 
-1. **Requirements.** Check `node -v` (22 or newer), `ffmpeg -version`, and that Edge or Chrome exists. For each
-   missing one explain what it is for and ask whether you may install it (`winget install -e --id OpenJS.NodeJS.LTS`,
-   `winget install -e --id Gyan.FFmpeg`, `winget install -e --id Google.Chrome`); a new terminal is needed afterwards.
-   Without winget, give them the download page instead. Node is required; without ffmpeg renders do not work.
-2. **Look, change nothing.** `powershell -ExecutionPolicy Bypass -File setup.ps1 -DryRun` prints every step and what it
-   found; `node scripts/init-config.mjs --state` says what is already decided and which video folders were found;
-   `node scripts/init-config.mjs --detect` says whether the graphics card can encode video.
+1. **Requirements.** Check `node -v` (22 or newer), `ffmpeg -version`, and that Chrome or Edge is in /Applications.
+   For each missing one explain what it is for and ask whether you may install it: `brew install node`,
+   `brew install ffmpeg`, `brew install --cask google-chrome`. Without Homebrew (`brew` not found), Homebrew needs
+   the user's password: give them the one line from https://brew.sh to paste into Terminal themselves, then continue.
+   Node is required; without ffmpeg renders do not work.
+2. **Look, change nothing.** `./setup.sh --dry-run` prints every step and what it found;
+   `node scripts/init-config.mjs --state` says what is already decided and which video folders were found;
+   `node scripts/init-config.mjs --detect` says whether the Mac's hardware encoder (VideoToolbox) works.
 3. **Ask the user**, with your question tool (not as a wall of text), recommended answer first, skipping anything
    `--state` shows as decided:
    - *Where should all your video work live?* One folder holds everything: `films` (one folder per film), `outputs`
-     (every finished video), `sounds`, `thumbnails`, `archive`. Offer `Documents\VideoHub` (recommended), a folder on
-     the Desktop such as `Desktop\ClaudeVideo`, or a path they name. Check a typed path with
+     (every finished video), `sounds`, `thumbnails`, `archive`. Offer `~/Documents/VideoHub` (recommended), a folder
+     on the Desktop such as `~/Desktop/ClaudeVideo`, or a path they name. Check a typed path with
      `node scripts/init-config.mjs --check "<folder>"`.
    - Only if folders were found: *VideoHub found folders that look like video work (list them). Watch them too?*
      (recommended: no; nothing is ever moved).
-   - Only if a graphics-card encoder was detected: *Use the graphics card for renders? Same quality, usually faster.*
-     (recommended: yes).
+   - Only if the hardware encoder works: *Use the Mac's video encoder for renders? Usually faster.* (recommended: yes).
    - *Should Claude show every new film in VideoHub before rendering it?* This adds a short rule to
      `~/.claude/CLAUDE.md` (recommended: yes).
-   - *Desktop shortcut?* (yes) · *Start VideoHub with Windows?* (no) · *Add the 10-second example film?* (yes).
+   - *VideoHub app in Applications?* (yes) · *Start VideoHub at login?* (no) · *Add the 10-second example film?* (yes).
 4. **Install once, with their answers, asking nothing more:**
-   `powershell -ExecutionPolicy Bypass -File setup.ps1 -Workspace "<folder>" -WatchFound yes|no -GpuEncoder yes|no -GlobalRule yes|no -Shortcut yes|no -Startup yes|no -Example yes|no`
+   `./setup.sh --workspace "<folder>" --watch-found yes|no --gpu-encoder yes|no --global-rule yes|no --shortcut yes|no --startup yes|no --example yes|no`
    Read its output; if it lists things "left for you to do", handle them with the user. If a step fails, show the
    error in plain words and stop; do not work around it.
-5. **Check it works.** `node server/cli.js hub_workspace` (starts VideoHub and prints the folders);
-   `wscript open.vbs` opens the window; with the example film, `node server/cli.js hub_project "{\"project\":\"hello-film\"}"`.
-6. **Tell the user what now:** where their workspace is, that the Desktop shortcut opens VideoHub, the first thing to
-   try (click the hello-film card, press Space, click a frame to leave a note), and that they must start a **new**
-   Claude Code session for the `hub_*` tools. Films are made in the workspace's `films` folder, never inside this
-   VideoHub folder: for a first film they open the workspace (or any folder) in a new session and ask for a video.
+5. **Check it works.** `node server/cli.js hub_workspace` (starts VideoHub and prints the folders); `./open.sh` opens
+   the window; with the example film, `node server/cli.js hub_project '{"project":"hello-film"}'`.
+6. **Tell the user what now:** where their workspace is, that the VideoHub app (Applications, Spotlight) opens it, the
+   first thing to try (click the hello-film card, press Space, click a frame to leave a note), and that they must start
+   a **new** Claude Code session for the `hub_*` tools. Films are made in the workspace's `films` folder, never
+   inside this VideoHub folder: for a first film they open the workspace (or any folder) in a new session and ask for a
+   video.
 
-## Setup on a new PC (what `SETUP.cmd` does)
-`SETUP.cmd` (or `powershell -ExecutionPolicy Bypass -File setup.ps1`; `-DryRun` asks nothing, assumes the recommended
-answers and changes nothing outside this folder; `-Yes` takes every recommended answer). It checks Node 22+, ffmpeg and
-Edge/Chrome, runs `npm install` (render protection is part of the server: nothing is compiled), then asks plain questions
-(each also a parameter): the workspace folder (default `Documents\VideoHub`: films, outputs, sounds, thumbnails,
-archive), watching video folders it found, the graphics-card encoder, the global rule, the Desktop shortcut, start with
-Windows, the example film. The logic lives in `scripts/init-config.mjs` (unit-tested); a re-run keeps every answer and
-never moves or overwrites folders or `data/config.json` values. It registers the MCP server `videohub` (user scope) and
-installs `skill/videohub` into `~/.claude/skills`.
-Missing Node: `winget install -e --id OpenJS.NodeJS.LTS`; missing ffmpeg: `winget install -e --id Gyan.FFmpeg`. Tell the
-user; do not work around them. Uninstall: `uninstall.ps1` (`-DryRun` too).
+## Setup on a new Mac (what `SETUP.command` does)
+`SETUP.command` (double-click in the Finder) or `./setup.sh` (`--dry-run` asks nothing, assumes the recommended
+answers and changes nothing outside this folder; `--yes` takes every recommended answer; `--help` lists the answers).
+`setup.sh` checks Node 22+ and runs `scripts/setup.mjs`: it checks ffmpeg and Chrome/Edge, runs `npm install`, then
+asks plain questions (each also an option): the workspace folder (default `~/Documents/VideoHub`: films, outputs,
+sounds, thumbnails, archive), watching video folders it found, the hardware encoder, the global rule, the VideoHub app
+(`~/Applications/VideoHub.app`, made with `osacompile`, icon from `scripts/make-icon.mjs`), start at login (a
+LaunchAgent), the example film. The config logic lives in `scripts/init-config.mjs` (unit-tested); a re-run keeps every
+answer and never moves or overwrites folders or `data/config.json` values. It registers the MCP server `videohub` (user
+scope; the `claude` CLI, also the copy inside the Claude desktop app, else `~/.claude.json` directly) and installs
+`skill/videohub` into `~/.claude/skills`. Update: `./update.sh` (git pull + setup --yes). Uninstall: `./uninstall.sh`
+(`--dry-run` too; everything it removes goes to the Trash).
 
 ## Map (short)
 - `server/hub.js` HTTP + SSE; `scan.js` projects; `live.js` live preview; `notes.js` notes; `jobs.js` render queue;
   `tools.js` the `hub_*` tools (`mcp.js`, `cli.js`); `legacy.js` + `ui/values.js` stored values and legacy aliases;
-  `config.js` settings and default folders (the workspace, `Documents\VideoHub\…` by default); `encoders.js` render
-  encoders; `scripts/init-config.mjs` setup's config helper.
+  `config.js` settings and default folders (the workspace, `~/Documents/VideoHub/…` by default); `encoders.js` render
+  encoders (VideoToolbox, x264); `guard.js` render protection (nice + background QoS, RAM from vm_stat); `mac.js` macOS; `scripts/init-config.mjs` setup's config helper.
 - `ui/app.js` pages, `ui/review*` review editor, `ui/thumbstudio*` Thumbnail Studio.
-- `guard/` render protection agent; `engine-hooks/` page-side editor hooks; `examples/hello-film` the example film;
+- `engine-hooks/` page-side editor hooks; `examples/hello-film` the example film;
   `templates/new-film` the starter for new films; `templates/thumbnail` built-in thumbnail templates.
 
 ## Rules
 - Test on copies: a scratch project added as a root of a test hub, never the user's real projects. Other sessions may be
   rendering.
-- Setup while developing VideoHub: only ever `-DryRun`; test its logic through `scripts/init-config.mjs --data <scratch>`.
+- Setup while developing VideoHub: only ever `--dry-run`; test its logic through `scripts/init-config.mjs --data <scratch>`.
   (A real run is for "Installing VideoHub for the user" above, with their answers.)
 - Render script (`templates/new-film/render.js`, same file as `examples/hello-film/render.js`): test renders only on a
   scratch copy of the example under `.test-tmp`, short clips, one at a time; see docs/RENDER-SPEED.md for the checks.
